@@ -8,10 +8,9 @@ terraform {
     }
   }
 
-  # Remote state in the shared GCS bucket managed by data-platform-gcp.
-  # The bucket is created by bootstrap.sh; prefix isolates this app's state.
-  backend "gcs" {
-    bucket = "YOUR-PROJECT-ID-tfstate"
-    prefix = "mqtt2pubsub"
-  }
+  # Partial backend configuration — bucket and prefix are passed at init time
+  # by the deploy workflow using the GCP_PROJECT_ID secret:
+  #   terraform init -backend-config="bucket=${PROJECT_ID}-tfstate" \
+  #                  -backend-config="prefix=mqtt2pubsub"
+  backend "gcs" {}
 }
