@@ -51,10 +51,11 @@ resource "google_service_account" "job" {
   display_name = "mqtt2pubsub Cloud Run Job"
 }
 
-resource "google_project_iam_member" "pubsub_publisher" {
-  project = var.project_id
-  role    = "roles/pubsub.publisher"
-  member  = "serviceAccount:${google_service_account.job.email}"
+# Scoped to this topic only — not the entire project.
+resource "google_pubsub_topic_iam_member" "job_publisher" {
+  topic  = google_pubsub_topic.mqtt_ingest.id
+  role   = "roles/pubsub.publisher"
+  member = "serviceAccount:${google_service_account.job.email}"
 }
 
 resource "google_cloud_run_v2_job" "mqtt2pubsub" {
@@ -107,6 +108,6 @@ resource "google_cloud_run_v2_job" "mqtt2pubsub" {
   }
 
   depends_on = [
-    google_project_iam_member.pubsub_publisher,
+    google_pubsub_topic_iam_member.job_publisher,
   ]
 }
