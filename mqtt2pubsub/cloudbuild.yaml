@@ -1,0 +1,12 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --no-cache
+      - --platform
+      - linux/amd64
+      - -t
+      - gcr.io/$PROJECT_ID/mqtt2pubsub:latest
+      - .
+images:
+  - gcr.io/$PROJECT_ID/mqtt2pubsub:latest

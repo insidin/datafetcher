@@ -1,0 +1,117 @@
+name: implement-mqtt2pubsub
+
+# Triggers:
+#   1. Label an issue with "claude"  →  Claude implements the issue body.
+#   2. Comment "/implement <description>" on an issue
+#      →  Claude implements what the comment describes (uses issue body + comment as context).
+#
+# In both cases Claude Code will:
+#   • Create a branch  claude/issue-<number>
+#   • Implement the requested changes inside mqtt2pubsub/
+#   • Open a draft PR linked to the issue for your review
+#
+# Required secrets:
+#   ANTHROPIC_API_KEY  — your Anthropic API key
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write       # push branch
+  pull-requests: write  # open PR
+  issues: write         # post status comments / reactions
+
+jobs:
+  implement:
+    name: Implement with Claude Code
+    runs-on: ubuntu-latest
+
+    # Guard: only run when triggered correctly by an authorized human
+    if: |
+      (
+        github.event_name == 'issues' &&
+        github.event.label.name == 'claude' &&
+        github.event.issue.user.type != 'Bot'
+      ) || (
+        github.event_name == 'issue_comment' &&
+        startsWith(github.event.comment.body, '/implement') &&
+        github.event.comment.user.type != 'Bot' &&
+        github.event.issue.pull_request == null &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'),
+                 github.event.comment.author_association)
+      )
+
+    steps:
+      - name: Acknowledge
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            :robot: Got it — I'm working on this. I'll open a PR when I'm done.
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Build the implementation prompt from issue + (optional) comment context
+      - name: Build prompt
+        id: prompt
+        run: |
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_BODY=$(cat << 'ISSUE_BODY_EOF'
+          ${{ github.event.issue.body }}
+          ISSUE_BODY_EOF
+          )
+
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            # Strip the "/implement" command prefix to get the extra instructions
+            EXTRA=$(echo "${{ github.event.comment.body }}" | sed 's|^/implement[[:space:]]*||')
+            PROMPT="Implement the following feature for the mqtt2pubsub service (Python application in mqtt2pubsub/).
+
+          Issue #${{ github.event.issue.number }}: ${ISSUE_TITLE}
+
+          ${ISSUE_BODY}
+
+          Additional instructions from reviewer:
+          ${EXTRA}
+
+          Rules:
+          - Work only inside the mqtt2pubsub/ directory.
+          - Follow the conventions in mqtt2pubsub/CLAUDE.md.
+          - Do not commit directly to main. Create branch claude/issue-${{ github.event.issue.number }}.
+          - Open a draft PR that closes issue #${{ github.event.issue.number }}.
+          - If you make an architectural decision, add an ADR in mqtt2pubsub/docs/adr/."
+          else
+            PROMPT="Implement the following feature for the mqtt2pubsub service (Python application in mqtt2pubsub/).
+
+          Issue #${{ github.event.issue.number }}: ${ISSUE_TITLE}
+
+          ${ISSUE_BODY}
+
+          Rules:
+          - Work only inside the mqtt2pubsub/ directory.
+          - Follow the conventions in mqtt2pubsub/CLAUDE.md.
+          - Do not commit directly to main. Create branch claude/issue-${{ github.event.issue.number }}.
+          - Open a draft PR that closes issue #${{ github.event.issue.number }}.
+          - If you make an architectural decision, add an ADR in mqtt2pubsub/docs/adr/."
+          fi
+
+          # Write to file to avoid multiline quoting issues
+          echo "${PROMPT}" > /tmp/claude_prompt.txt
+          echo "prompt_file=/tmp/claude_prompt.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt_file: ${{ steps.prompt.outputs.prompt_file }}
+
+      - name: Post failure comment
+        if: failure()
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            :x: Implementation run failed. Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.

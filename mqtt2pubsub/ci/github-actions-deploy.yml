@@ -1,0 +1,80 @@
+name: deploy-mqtt2pubsub
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "mqtt2pubsub/**"
+      - ".github/workflows/deploy-mqtt2pubsub.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  APP_DIR: mqtt2pubsub
+  TF_DIR: mqtt2pubsub/terraform
+  REGION: us-central1
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build container image
+        run: |
+          IMAGE="gcr.io/${PROJECT_ID}/mqtt2pubsub:${GITHUB_SHA}"
+          gcloud builds submit "${APP_DIR}" --tag "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          EXTRA_ARGS=()
+          if [[ -n "${{ secrets.EVENT_TYPE_TOPIC_MAP }}" ]]; then
+            EXTRA_ARGS+=(-var="event_type_topic_map=${{ secrets.EVENT_TYPE_TOPIC_MAP }}")
+          fi
+          if [[ -n "${{ secrets.EVENT_TYPE_JSON_FIELDS }}" ]]; then
+            EXTRA_ARGS+=(-var="event_type_json_fields=${{ secrets.EVENT_TYPE_JSON_FIELDS }}")
+          fi
+          if [[ -n "${{ secrets.EVENT_TYPE_FALLBACK }}" ]]; then
+            EXTRA_ARGS+=(-var="event_type_fallback=${{ secrets.EVENT_TYPE_FALLBACK }}")
+          fi
+          if [[ -n "${{ secrets.DEVICE_IDENTIFIERS }}" ]]; then
+            EXTRA_ARGS+=(-var="device_identifiers=${{ secrets.DEVICE_IDENTIFIERS }}")
+          fi
+          if [[ -n "${{ secrets.MQTT_TOPIC_TEMPLATE }}" ]]; then
+            EXTRA_ARGS+=(-var="mqtt_topic_template=${{ secrets.MQTT_TOPIC_TEMPLATE }}")
+          fi
+          if [[ -n "${{ secrets.MQTT_CONSUMER_CLIENTS }}" ]]; then
+            EXTRA_ARGS+=(-var="mqtt_consumer_clients=${{ secrets.MQTT_CONSUMER_CLIENTS }}")
+          fi
+          terraform apply -auto-approve \
+            -var="project_id=${PROJECT_ID}" \
+            -var="region=${REGION}" \
+            -var="container_image=${IMAGE}" \
+            -var="mqtt_host=${{ secrets.MQTT_HOST }}" \
+            -var="mqtt_topic=${{ secrets.MQTT_TOPIC }}" \
+            -var="mqtt_username_secret=${{ secrets.MQTT_USERNAME_SECRET }}" \
+            -var="mqtt_password_secret=${{ secrets.MQTT_PASSWORD_SECRET }}" \
+            "${EXTRA_ARGS[@]}"

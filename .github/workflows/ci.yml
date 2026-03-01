@@ -1,0 +1,49 @@
+name: ci
+
+# Runs on every PR and every push to main.
+# Both jobs must pass before a PR can be merged (enforce via branch protection rules).
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # ── Secret scanning ────────────────────────────────────────────────────────
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history so gitleaks can diff all commits in the PR)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Python lint ────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff==0.4.4
+
+      - name: Ruff check
+        run: ruff check mqtt2pubsub/
+
+      - name: Ruff format check
+        run: ruff format --check mqtt2pubsub/

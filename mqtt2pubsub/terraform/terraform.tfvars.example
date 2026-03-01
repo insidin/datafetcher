@@ -1,0 +1,35 @@
+project_id      = "your-project-id"
+region          = "us-central1"
+job_name        = "mqtt2pubsub-job"
+container_image = "gcr.io/your-project-id/mqtt2pubsub:latest"
+
+pubsub_topic_name  = "mqtt-ingest"
+service_account_id = "mqtt2pubsub-job-sa"
+
+mqtt_host        = "broker.example.com"
+mqtt_port        = 8883
+mqtt_topic       = "devices/+/telemetry"
+# Alternative to mqtt_topic:
+# device_identifiers = "device-a,device-b,device-c"
+# mqtt_topic_template = "{identifier}/#"
+# mqtt_consumer_clients = 2
+mqtt_qos         = 1
+mqtt_tls_enabled = true
+mqtt_tls_insecure = false
+
+# Event type strategy
+event_type_topic_map   = "devices/+/telemetry=telemetry;devices/+/state=state"
+event_type_json_fields = "event_type,type,kind"
+event_type_fallback    = "unknown"
+
+# Optional limits and behavior
+task_timeout_seconds      = 86400
+task_max_retries          = 1
+pubsub_publish_retries    = 5
+pubsub_publish_timeout_sec = 30
+max_messages              = 0
+max_runtime_sec           = 0
+
+# Optional Secret Manager references
+# mqtt_username_secret = "mqtt-username"
+# mqtt_password_secret = "mqtt-password"

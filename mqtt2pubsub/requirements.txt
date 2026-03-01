@@ -1,0 +1,2 @@
+google-cloud-pubsub==2.31.1
+paho-mqtt==2.1.0

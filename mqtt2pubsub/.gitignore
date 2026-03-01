@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env.local
+.env.*.local
+local/forwarded.ndjson
+
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.*
+terraform/terraform.tfvars

@@ -1,0 +1,79 @@
+name: deploy-mqtt2pubsub
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "mqtt2pubsub/**"
+      - ".github/workflows/deploy-mqtt2pubsub.yml"
+  workflow_dispatch:
+  workflow_call: # allows release-mqtt2pubsub.yml to chain into this
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  APP_DIR: mqtt2pubsub
+  TF_DIR: mqtt2pubsub/terraform
+  REGION: us-central1
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build container image
+        run: |
+          IMAGE="gcr.io/${PROJECT_ID}/mqtt2pubsub:${GITHUB_SHA}"
+          gcloud builds submit "${APP_DIR}" --tag "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        # Secrets are passed as TF_VAR_* environment variables — never interpolated
+        # into shell strings — to prevent command injection via special characters.
+        env:
+          TF_VAR_project_id: ${{ env.PROJECT_ID }}
+          TF_VAR_region: ${{ env.REGION }}
+          TF_VAR_container_image: ${{ env.IMAGE }}
+          TF_VAR_mqtt_host: ${{ secrets.MQTT_HOST }}
+          TF_VAR_mqtt_topic: ${{ secrets.MQTT_TOPIC }}
+          TF_VAR_mqtt_username_secret: ${{ secrets.MQTT_USERNAME_SECRET }}
+          TF_VAR_mqtt_password_secret: ${{ secrets.MQTT_PASSWORD_SECRET }}
+          TF_VAR_event_type_topic_map: ${{ secrets.EVENT_TYPE_TOPIC_MAP }}
+          TF_VAR_event_type_json_fields: ${{ secrets.EVENT_TYPE_JSON_FIELDS }}
+          TF_VAR_event_type_fallback: ${{ secrets.EVENT_TYPE_FALLBACK }}
+          TF_VAR_device_identifiers: ${{ secrets.DEVICE_IDENTIFIERS }}
+          TF_VAR_mqtt_topic_template: ${{ secrets.MQTT_TOPIC_TEMPLATE }}
+        run: |
+          EXTRA_ARGS=()
+          # mqtt_consumer_clients is numeric — validate before use
+          CLIENTS="${{ secrets.MQTT_CONSUMER_CLIENTS }}"
+          if [[ -n "${CLIENTS}" ]]; then
+            if ! [[ "${CLIENTS}" =~ ^[0-9]+$ ]]; then
+              echo "MQTT_CONSUMER_CLIENTS must be a positive integer, got: ${CLIENTS}" >&2
+              exit 1
+            fi
+            EXTRA_ARGS+=(-var="mqtt_consumer_clients=${CLIENTS}")
+          fi
+          terraform apply -auto-approve "${EXTRA_ARGS[@]}"
