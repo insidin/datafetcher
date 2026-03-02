@@ -170,8 +170,8 @@ variable "event_type_fallback" {
 
 variable "mqtt_username_secret" {
   type        = string
-  description = "Secret Manager secret name for MQTT username. Leave empty to skip."
-  default     = ""
+  description = "Secret Manager secret name for MQTT username. Defaults to the conventional name 'mqtt-username'. Set to empty string to skip (anonymous brokers)."
+  default     = "mqtt-username"
 }
 
 variable "mqtt_username_secret_version" {
@@ -182,8 +182,8 @@ variable "mqtt_username_secret_version" {
 
 variable "mqtt_password_secret" {
   type        = string
-  description = "Secret Manager secret name for MQTT password. Leave empty to skip."
-  default     = ""
+  description = "Secret Manager secret name for MQTT password. Defaults to the conventional name 'mqtt-password'. Set to empty string to skip (anonymous brokers)."
+  default     = "mqtt-password"
 }
 
 variable "mqtt_password_secret_version" {
