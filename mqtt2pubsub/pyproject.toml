@@ -20,3 +20,4 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "local/*" = ["S", "B"]  # local dev scripts, lower security bar
+"tests/*" = ["S101"]    # assert is expected in pytest test files

@@ -27,6 +27,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ── Unit tests (no GCP / MQTT required) ───────────────────────────────
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          pip install -q pytest paho-mqtt google-cloud-pubsub
+          pytest tests/ -v
+
+      # ── GCP authentication ─────────────────────────────────────────────────
+
       - name: Authenticate to Google Cloud (OIDC)
         uses: google-github-actions/auth@v2
         with:
@@ -36,13 +51,31 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
+      # ── Container image ────────────────────────────────────────────────────
+
       - name: Build and push container image
         run: |
           IMAGE="${AR_REPO}/mqtt2pubsub:${GITHUB_SHA}"
           gcloud auth configure-docker "${AR_REPO%%/*}" --quiet
-          docker build -t "${IMAGE}" "${APP_DIR}"
+          docker build --platform linux/amd64 -t "${IMAGE}" "${APP_DIR}"
           docker push "${IMAGE}"
           echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Verify image architecture
+        run: |
+          ARCH=$(docker inspect --format '{{.Os}}/{{.Architecture}}' "${IMAGE}")
+          echo "Image architecture: ${ARCH}"
+          if [[ "${ARCH}" != "linux/amd64" ]]; then
+            echo "ERROR: expected linux/amd64, got ${ARCH}" >&2
+            exit 1
+          fi
+
+      - name: Smoke-test container imports
+        run: |
+          docker run --rm --platform linux/amd64 "${IMAGE}" \
+            python -c "import main; print('imports OK')"
+
+      # ── Terraform ──────────────────────────────────────────────────────────
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -53,6 +86,10 @@ jobs:
           terraform init \
             -backend-config="bucket=${PROJECT_ID}-tfstate" \
             -backend-config="prefix=mqtt2pubsub"
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
 
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
