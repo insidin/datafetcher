@@ -242,7 +242,10 @@ class Settings:
         project_id = os.getenv("GCP_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT") or ""
         pubsub_topic_raw = os.getenv("PUBSUB_TOPIC", "").strip()
         mqtt_topic_raw = os.getenv("MQTT_TOPIC", "").strip() or None
-        mqtt_topic_template = os.getenv("MQTT_TOPIC_TEMPLATE", "{identifier}/#").strip()
+        # Use `or` so an empty string (e.g. from an unset GitHub secret that
+        # Terraform passes as "") falls back to the default, same as if the
+        # variable were absent entirely.
+        mqtt_topic_template = (os.getenv("MQTT_TOPIC_TEMPLATE") or "{identifier}/#").strip()
         device_identifiers = _parse_device_identifiers(os.getenv("DEVICE_IDENTIFIERS", ""))
         mqtt_subscription_filters = _build_subscription_filters(
             mqtt_topic=mqtt_topic_raw,

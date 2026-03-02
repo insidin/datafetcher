@@ -75,14 +75,10 @@ jobs:
           docker run --rm --platform linux/amd64 "${IMAGE}" \
             python -c "import main; print('imports OK')"
 
-      - name: Smoke-test container health endpoint
-        # Starts the container with an unreachable MQTT host (no broker running
-        # on localhost). With the resilient reconnect logic the container must
-        # stay alive and keep the health server responding on $PORT even when
-        # MQTT is unavailable. If the container crashes instead, this step fails
-        # and we catch the bug before deploying to Cloud Run.
+      - name: Smoke-test container health endpoint (MQTT_TOPIC mode)
+        # Verifies the health server stays up even when MQTT is unreachable.
         run: |
-          docker run -d --name mqtt2pubsub-smoke \
+          docker run -d --name mqtt2pubsub-smoke-topic \
             --platform linux/amd64 \
             -p 8099:8080 \
             -e FORWARD_MODE=stdout \
@@ -91,19 +87,33 @@ jobs:
             -e MQTT_TLS_ENABLED=false \
             -e MQTT_TOPIC=test/# \
             "${IMAGE}"
-
-          # Give the health server time to bind the port
           sleep 5
-
           HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8099/)
-          echo "Health endpoint returned HTTP ${HTTP_STATUS}"
-          docker logs mqtt2pubsub-smoke
-          docker rm -f mqtt2pubsub-smoke
+          docker logs mqtt2pubsub-smoke-topic
+          docker rm -f mqtt2pubsub-smoke-topic
+          echo "MQTT_TOPIC mode: HTTP ${HTTP_STATUS}"
+          [[ "${HTTP_STATUS}" == "200" ]] || { echo "ERROR: expected 200" >&2; exit 1; }
 
-          if [[ "${HTTP_STATUS}" != "200" ]]; then
-            echo "ERROR: expected HTTP 200, got ${HTTP_STATUS}" >&2
-            exit 1
-          fi
+      - name: Smoke-test container health endpoint (DEVICE_IDENTIFIERS mode)
+        # Mirrors the production config: DEVICE_IDENTIFIERS set, MQTT_TOPIC
+        # unset, MQTT_TOPIC_TEMPLATE unset (empty). This is the exact config
+        # that caused every previous startup failure.
+        run: |
+          docker run -d --name mqtt2pubsub-smoke-devices \
+            --platform linux/amd64 \
+            -p 8098:8080 \
+            -e FORWARD_MODE=stdout \
+            -e MQTT_HOST=localhost \
+            -e MQTT_PORT=1883 \
+            -e MQTT_TLS_ENABLED=false \
+            -e DEVICE_IDENTIFIERS=device1,device2 \
+            "${IMAGE}"
+          sleep 5
+          HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8098/)
+          docker logs mqtt2pubsub-smoke-devices
+          docker rm -f mqtt2pubsub-smoke-devices
+          echo "DEVICE_IDENTIFIERS mode: HTTP ${HTTP_STATUS}"
+          [[ "${HTTP_STATUS}" == "200" ]] || { echo "ERROR: expected 200" >&2; exit 1; }
 
       # ── Terraform ──────────────────────────────────────────────────────────
 
@@ -123,22 +133,36 @@ jobs:
 
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
-        # Secrets are passed as TF_VAR_* environment variables — never interpolated
-        # into shell strings — to prevent command injection via special characters.
+        # Required vars are passed directly as TF_VAR_* env vars — never
+        # interpolated into shell strings — to prevent command injection.
+        #
+        # Optional vars (those with defaults in variables.tf) are staged via
+        # _OPT_* env vars and exported as TF_VAR_* only when non-empty.
+        # This prevents an unset GitHub secret (which GitHub evaluates as "")
+        # from overriding the Terraform variable default with an empty string.
         env:
           TF_VAR_project_id: ${{ env.PROJECT_ID }}
           TF_VAR_region: ${{ env.REGION }}
           TF_VAR_container_image: ${{ env.IMAGE }}
           TF_VAR_service_account_email: "mqtt2pubsub-worker-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
           TF_VAR_mqtt_host: ${{ secrets.MQTT_HOST }}
-          TF_VAR_mqtt_topic: ${{ secrets.MQTT_TOPIC }}
-          TF_VAR_event_type_topic_map: ${{ secrets.EVENT_TYPE_TOPIC_MAP }}
-          TF_VAR_event_type_json_fields: ${{ secrets.EVENT_TYPE_JSON_FIELDS }}
-          TF_VAR_event_type_fallback: ${{ secrets.EVENT_TYPE_FALLBACK }}
-          TF_VAR_device_identifiers: ${{ secrets.DEVICE_IDENTIFIERS }}
-          TF_VAR_mqtt_topic_template: ${{ secrets.MQTT_TOPIC_TEMPLATE }}
+          # Optional — staged for conditional export below
+          _OPT_MQTT_TOPIC: ${{ secrets.MQTT_TOPIC }}
+          _OPT_MQTT_TOPIC_TEMPLATE: ${{ secrets.MQTT_TOPIC_TEMPLATE }}
+          _OPT_EVENT_TYPE_TOPIC_MAP: ${{ secrets.EVENT_TYPE_TOPIC_MAP }}
+          _OPT_EVENT_TYPE_JSON_FIELDS: ${{ secrets.EVENT_TYPE_JSON_FIELDS }}
+          _OPT_EVENT_TYPE_FALLBACK: ${{ secrets.EVENT_TYPE_FALLBACK }}
+          _OPT_DEVICE_IDENTIFIERS: ${{ secrets.DEVICE_IDENTIFIERS }}
         run: |
-          EXTRA_ARGS=()
+          # Export optional TF_VAR_* only when the secret is non-empty so that
+          # an unset secret doesn't override the default in variables.tf.
+          [[ -n "${_OPT_MQTT_TOPIC}" ]]            && export TF_VAR_mqtt_topic="${_OPT_MQTT_TOPIC}"
+          [[ -n "${_OPT_MQTT_TOPIC_TEMPLATE}" ]]   && export TF_VAR_mqtt_topic_template="${_OPT_MQTT_TOPIC_TEMPLATE}"
+          [[ -n "${_OPT_EVENT_TYPE_TOPIC_MAP}" ]]  && export TF_VAR_event_type_topic_map="${_OPT_EVENT_TYPE_TOPIC_MAP}"
+          [[ -n "${_OPT_EVENT_TYPE_JSON_FIELDS}" ]] && export TF_VAR_event_type_json_fields="${_OPT_EVENT_TYPE_JSON_FIELDS}"
+          [[ -n "${_OPT_EVENT_TYPE_FALLBACK}" ]]   && export TF_VAR_event_type_fallback="${_OPT_EVENT_TYPE_FALLBACK}"
+          [[ -n "${_OPT_DEVICE_IDENTIFIERS}" ]]    && export TF_VAR_device_identifiers="${_OPT_DEVICE_IDENTIFIERS}"
+
           # mqtt_consumer_clients is numeric — validate before use
           CLIENTS="${{ secrets.MQTT_CONSUMER_CLIENTS }}"
           if [[ -n "${CLIENTS}" ]]; then
@@ -146,6 +170,7 @@ jobs:
               echo "MQTT_CONSUMER_CLIENTS must be a positive integer, got: ${CLIENTS}" >&2
               exit 1
             fi
-            EXTRA_ARGS+=(-var="mqtt_consumer_clients=${CLIENTS}")
+            export TF_VAR_mqtt_consumer_clients="${CLIENTS}"
           fi
-          terraform apply -auto-approve "${EXTRA_ARGS[@]}"
+
+          terraform apply -auto-approve

@@ -265,6 +265,18 @@ class TestSettingsFromEnv:
         s = main.Settings.from_env()
         assert s.mqtt_subscription_filters == ("dev1/state", "dev2/state")
 
+    def test_device_identifiers_with_empty_template_uses_default(self, monkeypatch):
+        # Regression: MQTT_TOPIC_TEMPLATE set to "" (e.g. unset GitHub secret
+        # passed by Terraform as empty string) must fall back to "{identifier}/#"
+        # and NOT raise ValueError. This was the root cause of every Cloud Run
+        # startup failure.
+        self._base_env(monkeypatch)
+        monkeypatch.delenv("MQTT_TOPIC")
+        monkeypatch.setenv("DEVICE_IDENTIFIERS", "dev1,dev2")
+        monkeypatch.setenv("MQTT_TOPIC_TEMPLATE", "")  # empty string — the failure case
+        s = main.Settings.from_env()
+        assert s.mqtt_subscription_filters == ("dev1/#", "dev2/#")
+
     def test_consumer_clients_partition(self, monkeypatch):
         self._base_env(monkeypatch)
         monkeypatch.delenv("MQTT_TOPIC")
