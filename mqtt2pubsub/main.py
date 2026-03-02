@@ -571,8 +571,27 @@ def _configure_logging() -> None:
     )
 
 
+def _start_health_server() -> None:
+    """Minimal HTTP server on $PORT so Cloud Run Service reports healthy."""
+    import http.server
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass  # suppress access logs
+
+    port = int(os.getenv("PORT", "8080"))
+    server = http.server.HTTPServer(("", port), _Handler)
+    server.serve_forever()
+
+
 def main() -> int:
     _configure_logging()
+
+    threading.Thread(target=_start_health_server, daemon=True).start()
 
     settings = Settings.from_env()
     forwarder = MqttToPubSubForwarder(settings)

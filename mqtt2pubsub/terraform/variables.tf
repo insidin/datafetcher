@@ -5,14 +5,14 @@ variable "project_id" {
 
 variable "region" {
   type        = string
-  description = "GCP region for Cloud Run Job."
+  description = "GCP region for Cloud Run Service."
   default     = "us-central1"
 }
 
-variable "job_name" {
+variable "service_name" {
   type        = string
-  description = "Cloud Run Job name."
-  default     = "mqtt2pubsub-job"
+  description = "Cloud Run Service name."
+  default     = "mqtt2pubsub"
 }
 
 variable "container_image" {
@@ -20,40 +20,21 @@ variable "container_image" {
   description = "Container image URL (for example gcr.io/<project>/mqtt2pubsub:latest)."
 }
 
-variable "service_account_id" {
+variable "service_account_email" {
   type        = string
-  description = "Service account ID (not email) used by Cloud Run Job."
-  default     = "mqtt2pubsub-job-sa"
+  description = "Worker service account email. Created by data-platform-gcp; passed via TF_VAR_service_account_email in the deploy workflow."
+}
+
+variable "min_instance_count" {
+  type        = number
+  description = "Minimum number of Cloud Run instances. Set to 1 to keep the MQTT loop always running."
+  default     = 1
 }
 
 variable "pubsub_topic_name" {
   type        = string
   description = "Pub/Sub topic name where messages are forwarded."
   default     = "mqtt-ingest"
-}
-
-variable "task_timeout_seconds" {
-  type        = number
-  description = "Cloud Run task timeout in seconds."
-  default     = 86400
-}
-
-variable "task_max_retries" {
-  type        = number
-  description = "Cloud Run task max retries."
-  default     = 1
-}
-
-variable "task_count" {
-  type        = number
-  description = "Number of tasks per execution."
-  default     = 1
-}
-
-variable "parallelism" {
-  type        = number
-  description = "Max tasks run in parallel."
-  default     = 1
 }
 
 variable "cpu" {
