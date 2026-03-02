@@ -38,7 +38,8 @@ jobs:
       - name: Build container image
         run: |
           IMAGE="gcr.io/${PROJECT_ID}/mqtt2pubsub:${GITHUB_SHA}"
-          gcloud builds submit "${APP_DIR}" --tag "${IMAGE}"
+          gcloud builds submit "${APP_DIR}" --tag "${IMAGE}" \
+            --gcs-source-staging-dir="gs://${PROJECT_ID}-tfstate/cloudbuild-staging"
           echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
 
       - name: Setup Terraform
