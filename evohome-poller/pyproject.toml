@@ -1,0 +1,23 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "S",   # flake8-bandit (security)
+    "UP",  # pyupgrade
+]
+ignore = [
+    "S105", # hardcoded password — false positives on variable names like 'password'
+    "S106",
+    "B904", # raise from inside except — not always applicable
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]   # assert is expected in pytest test files
+"poller.py" = ["S101"] # assert used for type narrowing in TokenManager._load_cache
