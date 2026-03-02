@@ -40,7 +40,7 @@ jobs:
         run: |
           IMAGE="${AR_REPO}/mqtt2pubsub:${GITHUB_SHA}"
           gcloud auth configure-docker "${AR_REPO%%/*}" --quiet
-          docker build -t "${IMAGE}" "${APP_DIR}"
+          docker build --platform linux/amd64 -t "${IMAGE}" "${APP_DIR}"
           docker push "${IMAGE}"
           echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
 
