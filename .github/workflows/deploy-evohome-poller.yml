@@ -1,0 +1,124 @@
+name: deploy-evohome-poller
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "evohome-poller/**"
+      - ".github/workflows/deploy-evohome-poller.yml"
+  workflow_dispatch:
+  workflow_call: # allows release-evohome-poller.yml to chain into this
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  APP_DIR: evohome-poller
+  TF_DIR: evohome-poller/terraform
+  REGION: europe-west1
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  AR_REPO: ${{ secrets.EVOHOME_GCP_ARTIFACT_REGISTRY_REPO }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Unit tests (no GCP / network required) ────────────────────────────
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Lint and run unit tests
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          pip install -q ruff pytest requests google-cloud-pubsub google-cloud-storage
+          ruff check .
+          ruff format --check .
+          pytest tests/ -v
+
+      # ── GCP authentication ─────────────────────────────────────────────────
+
+      - name: Authenticate to Google Cloud (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.EVOHOME_GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # ── Container image ────────────────────────────────────────────────────
+
+      - name: Build and push container image
+        run: |
+          IMAGE="${AR_REPO}/evohome-poller:${GITHUB_SHA}"
+          gcloud auth configure-docker "${AR_REPO%%/*}" --quiet
+          docker build --platform linux/amd64 -t "${IMAGE}" "${APP_DIR}"
+          docker push "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Verify image architecture
+        run: |
+          ARCH=$(docker inspect --format '{{.Os}}/{{.Architecture}}' "${IMAGE}")
+          echo "Image architecture: ${ARCH}"
+          if [[ "${ARCH}" != "linux/amd64" ]]; then
+            echo "ERROR: expected linux/amd64, got ${ARCH}" >&2
+            exit 1
+          fi
+
+      - name: Smoke-test container imports
+        run: |
+          docker run --rm --platform linux/amd64 "${IMAGE}" \
+            python -c "import poller; print('imports OK')"
+
+      - name: Smoke-test container --help
+        # Verifies argparse is wired up and the script exits 0 for --help.
+        run: |
+          docker run --rm --platform linux/amd64 "${IMAGE}" --help
+
+      # ── Terraform ──────────────────────────────────────────────────────────
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${PROJECT_ID}-tfstate" \
+            -backend-config="prefix=evohome-poller"
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        # Required vars are passed directly as TF_VAR_* env vars — never
+        # interpolated into shell strings — to prevent command injection.
+        #
+        # Optional vars (those with defaults in variables.tf) are staged via
+        # _OPT_* env vars and exported as TF_VAR_* only when non-empty.
+        # This prevents an unset GitHub secret (evaluated as "" by GitHub)
+        # from overriding the Terraform variable default with an empty string.
+        env:
+          TF_VAR_project_id: ${{ env.PROJECT_ID }}
+          TF_VAR_region: ${{ env.REGION }}
+          TF_VAR_container_image: ${{ env.IMAGE }}
+          TF_VAR_service_account_email: "evohome-poller-worker-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
+          # Optional — staged for conditional export below
+          _OPT_LOCATION_ID: ${{ secrets.EVOHOME_LOCATION_ID }}
+          _OPT_SCHEDULER_CRON: ${{ secrets.EVOHOME_SCHEDULER_CRON }}
+          _OPT_LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+        run: |
+          [[ -n "${_OPT_LOCATION_ID}" ]]    && export TF_VAR_location_id="${_OPT_LOCATION_ID}"
+          [[ -n "${_OPT_SCHEDULER_CRON}" ]] && export TF_VAR_scheduler_cron="${_OPT_SCHEDULER_CRON}"
+          [[ -n "${_OPT_LOG_LEVEL}" ]]      && export TF_VAR_log_level="${_OPT_LOG_LEVEL}"
+
+          terraform apply -auto-approve

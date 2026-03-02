@@ -1,0 +1,37 @@
+# Archived legacy code
+old/
+
+# OS / Python cache
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+.venv*/
+venv/
+
+# Terraform local state and local-only overrides
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/crash.log
+terraform/crash.*.log
+terraform/*.tfvars
+terraform/*.tfvars.json
+terraform/override.tf
+terraform/override.tf.json
+terraform/*_override.tf
+terraform/*_override.tf.json
+
+# Local credentials and tokens
+.env
+.env.*
+*.pem
+*.key
+*sa-key*.json
+*service-account*.json
+*.token
+*.tokens
+*.token.json
+*.tokens.json
+token_cache.json
+.evohome_tokens.json
