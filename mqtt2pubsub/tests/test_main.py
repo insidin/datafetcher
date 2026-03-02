@@ -1,18 +1,19 @@
 """Unit tests for main.py — no GCP or MQTT broker required."""
 
-import sys
 import os
+import sys
 
 import pytest
 
 # main.py lives one directory above this file
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import main  # noqa: E402
+import main  # noqa: E402, I001
 
 
 # ---------------------------------------------------------------------------
 # _mqtt_topic_matches
 # ---------------------------------------------------------------------------
+
 
 class TestMqttTopicMatches:
     def test_exact_match(self):
@@ -54,6 +55,7 @@ class TestMqttTopicMatches:
 # _normalize_event_type
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeEventType:
     def test_lowercases(self):
         assert main._normalize_event_type("Temperature", "unknown") == "temperature"
@@ -77,6 +79,7 @@ class TestNormalizeEventType:
 # ---------------------------------------------------------------------------
 # _parse_event_type_topic_map
 # ---------------------------------------------------------------------------
+
 
 class TestParseEventTypeTopicMap:
     def test_empty_string(self):
@@ -114,6 +117,7 @@ class TestParseEventTypeTopicMap:
 # _parse_device_identifiers
 # ---------------------------------------------------------------------------
 
+
 class TestParseDeviceIdentifiers:
     def test_single(self):
         assert main._parse_device_identifiers("dev1") == ("dev1",)
@@ -140,6 +144,7 @@ class TestParseDeviceIdentifiers:
 # _build_subscription_filters
 # ---------------------------------------------------------------------------
 
+
 class TestBuildSubscriptionFilters:
     def test_single_topic(self):
         result = main._build_subscription_filters("sensors/#", (), "{identifier}/#")
@@ -165,6 +170,7 @@ class TestBuildSubscriptionFilters:
 # ---------------------------------------------------------------------------
 # _partition_filters
 # ---------------------------------------------------------------------------
+
 
 class TestPartitionFilters:
     def test_single_client_all_filters(self):
@@ -193,15 +199,23 @@ class TestPartitionFilters:
 # Settings.from_env  (stdout mode — no GCP credentials required)
 # ---------------------------------------------------------------------------
 
+
 class TestSettingsFromEnv:
     def _base_env(self, monkeypatch):
         monkeypatch.setenv("FORWARD_MODE", "stdout")
         monkeypatch.setenv("MQTT_HOST", "localhost")
         monkeypatch.setenv("MQTT_TOPIC", "test/#")
         # Clear variables that might linger from a real environment
-        for var in ("PUBSUB_TOPIC", "GCP_PROJECT_ID", "GOOGLE_CLOUD_PROJECT",
-                    "MQTT_QOS", "MQTT_CONSUMER_CLIENTS", "DEVICE_IDENTIFIERS",
-                    "EVENT_TYPE_TOPIC_MAP", "EVENT_TYPE_JSON_FIELDS"):
+        for var in (
+            "PUBSUB_TOPIC",
+            "GCP_PROJECT_ID",
+            "GOOGLE_CLOUD_PROJECT",
+            "MQTT_QOS",
+            "MQTT_CONSUMER_CLIENTS",
+            "DEVICE_IDENTIFIERS",
+            "EVENT_TYPE_TOPIC_MAP",
+            "EVENT_TYPE_JSON_FIELDS",
+        ):
             monkeypatch.delenv(var, raising=False)
 
     def test_minimal_stdout_mode(self, monkeypatch):
