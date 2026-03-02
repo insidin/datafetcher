@@ -73,9 +73,11 @@ jobs:
           fi
 
       - name: Smoke-test container imports
+        # --entrypoint overrides ENTRYPOINT in the Dockerfile so python runs
+        # directly instead of passing args to poller.py via argparse.
         run: |
-          docker run --rm --platform linux/amd64 "${IMAGE}" \
-            python -c "import poller; print('imports OK')"
+          docker run --rm --platform linux/amd64 --entrypoint python "${IMAGE}" \
+            -c "import poller; print('imports OK')"
 
       - name: Smoke-test container --help
         # Verifies argparse is wired up and the script exits 0 for --help.
