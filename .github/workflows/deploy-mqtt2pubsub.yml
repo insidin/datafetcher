@@ -75,6 +75,36 @@ jobs:
           docker run --rm --platform linux/amd64 "${IMAGE}" \
             python -c "import main; print('imports OK')"
 
+      - name: Smoke-test container health endpoint
+        # Starts the container with an unreachable MQTT host (no broker running
+        # on localhost). With the resilient reconnect logic the container must
+        # stay alive and keep the health server responding on $PORT even when
+        # MQTT is unavailable. If the container crashes instead, this step fails
+        # and we catch the bug before deploying to Cloud Run.
+        run: |
+          docker run -d --name mqtt2pubsub-smoke \
+            --platform linux/amd64 \
+            -p 8099:8080 \
+            -e FORWARD_MODE=stdout \
+            -e MQTT_HOST=localhost \
+            -e MQTT_PORT=1883 \
+            -e MQTT_TLS_ENABLED=false \
+            -e MQTT_TOPIC=test/# \
+            "${IMAGE}"
+
+          # Give the health server time to bind the port
+          sleep 5
+
+          HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8099/)
+          echo "Health endpoint returned HTTP ${HTTP_STATUS}"
+          docker logs mqtt2pubsub-smoke
+          docker rm -f mqtt2pubsub-smoke
+
+          if [[ "${HTTP_STATUS}" != "200" ]]; then
+            echo "ERROR: expected HTTP 200, got ${HTTP_STATUS}" >&2
+            exit 1
+          fi
+
       # ── Terraform ──────────────────────────────────────────────────────────
 
       - name: Setup Terraform

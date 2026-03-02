@@ -382,9 +382,15 @@ class MqttToPubSubForwarder:
     ) -> None:
         client_index, topic_filters = self._client_meta(userdata)
         if reason_code.is_failure:
-            self._set_fatal_exception(RuntimeError(f"MQTT connection failed with reason_code={reason_code}"))
-            self.stop_event.set()
-            client.disconnect()
+            # Log and return — do NOT stop the process. paho will reconnect
+            # using reconnect_delay_set(), which is essential for Cloud Run Service
+            # where the container must stay alive even when the broker is temporarily
+            # unreachable or rejects credentials.
+            logging.error(
+                "MQTT client=%s rejected by broker: %s (will retry)",
+                client_index or "?",
+                reason_code,
+            )
             return
         logging.info(
             "Connected MQTT client=%s to broker %s:%s",
@@ -512,6 +518,31 @@ class MqttToPubSubForwarder:
         self._set_fatal_exception(err)
         self.stop()
 
+    def _connect_with_retry(self, client: mqtt.Client, client_index: int) -> None:
+        """Keep trying client.connect() until it succeeds or stop_event is set.
+
+        Runs in a daemon thread. Required because paho's automatic reconnect only
+        kicks in after a successful initial connect; if the very first connect() call
+        raises (DNS failure, connection refused, TLS error) paho won't retry on its
+        own. Once the TCP connection is established, paho's reconnect_delay_set()
+        handles all subsequent reconnects transparently.
+        """
+        delay = 1
+        while not self.stop_event.is_set():
+            try:
+                client.connect(self.settings.mqtt_host, self.settings.mqtt_port, self.settings.mqtt_keepalive)
+                return  # TCP connected — paho loop + reconnect_delay_set handles the rest
+            except Exception:  # noqa: BLE001
+                logging.exception(
+                    "MQTT client=%s connect to %s:%s failed, retrying in %ss",
+                    client_index,
+                    self.settings.mqtt_host,
+                    self.settings.mqtt_port,
+                    delay,
+                )
+                self.stop_event.wait(delay)
+                delay = min(delay * 2, 30)
+
     def start(self) -> None:
         logging.info(
             "Forward mode=%s destination=%s",
@@ -523,9 +554,17 @@ class MqttToPubSubForwarder:
             list(self.settings.mqtt_subscription_filters),
             len(self.settings.mqtt_filter_groups),
         )
-        for client in self.mqtt_clients:
-            client.connect(self.settings.mqtt_host, self.settings.mqtt_port, self.settings.mqtt_keepalive)
+        for idx, client in enumerate(self.mqtt_clients):
+            client_index = idx + 1 if len(self.mqtt_clients) > 1 else 1
+            # Start the paho network loop before attempting to connect so it is
+            # ready to handle the CONNACK when _connect_with_retry succeeds.
             client.loop_start()
+            threading.Thread(
+                target=self._connect_with_retry,
+                args=(client, client_index),
+                daemon=True,
+                name=f"mqtt-connect-{client_index}",
+            ).start()
 
     def stop(self) -> None:
         if self.stop_event.is_set():
