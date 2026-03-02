@@ -192,6 +192,12 @@ variable "mqtt_password_secret_version" {
   default     = "latest"
 }
 
+variable "pubsub_message_retention" {
+  type        = string
+  description = "How long the Pub/Sub topic retains published messages, even without a subscription. Format: duration in seconds with 's' suffix (e.g. '604800s' = 7 days). Range: 600s–2678400s (31 days). Ensures messages are not lost when the subscriber is absent."
+  default     = "604800s" # 7 days
+}
+
 variable "labels" {
   type        = map(string)
   description = "Labels applied to created resources where supported."

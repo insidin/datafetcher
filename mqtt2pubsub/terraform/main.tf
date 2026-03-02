@@ -42,8 +42,9 @@ locals {
 }
 
 resource "google_pubsub_topic" "mqtt_ingest" {
-  name   = var.pubsub_topic_name
-  labels = var.labels
+  name                       = var.pubsub_topic_name
+  labels                     = var.labels
+  message_retention_duration = var.pubsub_message_retention
 }
 
 # Scoped to this topic only — not the entire project.
@@ -101,6 +102,29 @@ resource "google_cloud_run_v2_service" "mqtt2pubsub" {
             }
           }
         }
+      }
+
+      # Startup probe: give the process time to bind the port and connect to MQTT.
+      # Budget = initial_delay_seconds + (period_seconds × failure_threshold) = 5 + 10×18 = 185s.
+      startup_probe {
+        http_get {
+          path = "/"
+        }
+        initial_delay_seconds = 5
+        timeout_seconds       = 5
+        period_seconds        = 10
+        failure_threshold     = 18
+      }
+
+      # Liveness probe: restart the container if it stops responding (e.g. crashed MQTT loop).
+      liveness_probe {
+        http_get {
+          path = "/"
+        }
+        initial_delay_seconds = 30
+        timeout_seconds       = 5
+        period_seconds        = 30
+        failure_threshold     = 3
       }
     }
   }

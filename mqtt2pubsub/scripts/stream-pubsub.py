@@ -9,6 +9,14 @@ Usage:
     python scripts/stream-pubsub.py --project <PROJECT_ID>
     python scripts/stream-pubsub.py --project <PROJECT_ID> --topic mqtt-ingest
     python scripts/stream-pubsub.py --project <PROJECT_ID> --max-messages 10
+
+    # Filter by attribute (Pub/Sub CEL syntax):
+    python scripts/stream-pubsub.py --project <PROJECT_ID> --filter 'attributes.event_type = "temperature"'
+    python scripts/stream-pubsub.py --project <PROJECT_ID> --filter 'hasPrefix(attributes.mqtt_topic, "home/")'
+    python scripts/stream-pubsub.py --project <PROJECT_ID> --filter 'attributes.device_id = "sensor1"'
+
+Available attributes set by mqtt2pubsub:
+    mqtt_topic, event_type, event_type_source, mqtt_qos, mqtt_retain, mqtt_mid, received_at_utc
 """
 
 import argparse
@@ -26,11 +34,25 @@ except ImportError:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Stream messages from a Pub/Sub topic.")
+    p = argparse.ArgumentParser(
+        description="Stream messages from a Pub/Sub topic.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--project", required=True, help="GCP project ID")
     p.add_argument("--topic", default="mqtt-ingest", help="Pub/Sub topic name (default: mqtt-ingest)")
     p.add_argument(
         "--max-messages", type=int, default=0, help="Stop after N messages; 0 = stream indefinitely (default: 0)"
+    )
+    p.add_argument(
+        "--filter",
+        default=None,
+        metavar="CEL_EXPR",
+        help=(
+            "Pub/Sub attribute filter (CEL syntax). Only matching messages are delivered. Examples:\n"
+            '  attributes.event_type = "temperature"\n'
+            '  hasPrefix(attributes.mqtt_topic, "home/")\n'
+            '  attributes.device_id = "sensor1"'
+        ),
     )
     return p.parse_args()
 
@@ -49,9 +71,15 @@ def main() -> None:
     print(f"Topic:        {topic_path}")
     print(f"Subscription: {sub_path} (temporary, deleted on exit)")
     print(f"Max messages: {'unlimited' if max_messages == 0 else max_messages}")
+    if args.filter:
+        print(f"Filter:       {args.filter}")
     print("-" * 60)
 
-    subscriber.create_subscription(request={"name": sub_path, "topic": topic_path})
+    create_request: dict = {"name": sub_path, "topic": topic_path}
+    if args.filter:
+        create_request["filter"] = args.filter
+
+    subscriber.create_subscription(request=create_request)
     count = 0
 
     def cleanup(sig=None, frame=None) -> None:
