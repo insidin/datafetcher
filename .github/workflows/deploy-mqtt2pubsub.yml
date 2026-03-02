@@ -62,7 +62,7 @@ jobs:
           TF_VAR_service_account_email: "mqtt2pubsub-worker-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
           TF_VAR_mqtt_host: ${{ secrets.MQTT_HOST }}
           TF_VAR_mqtt_topic: ${{ secrets.MQTT_TOPIC }}
-TF_VAR_event_type_topic_map: ${{ secrets.EVENT_TYPE_TOPIC_MAP }}
+          TF_VAR_event_type_topic_map: ${{ secrets.EVENT_TYPE_TOPIC_MAP }}
           TF_VAR_event_type_json_fields: ${{ secrets.EVENT_TYPE_JSON_FIELDS }}
           TF_VAR_event_type_fallback: ${{ secrets.EVENT_TYPE_FALLBACK }}
           TF_VAR_device_identifiers: ${{ secrets.DEVICE_IDENTIFIERS }}
