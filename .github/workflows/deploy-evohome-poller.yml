@@ -53,6 +53,38 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
+      # ── Pre-flight checks ──────────────────────────────────────────────────
+      # Validate GCP prerequisites before attempting expensive build/apply steps.
+      # The deployer SA has secretmanager.viewer (secrets describe) and
+      # iam.serviceAccountUser on the worker SA (service-accounts describe).
+
+      - name: Pre-flight checks
+        run: |
+          FAILED=0
+
+          echo "==> Checking required secrets exist..."
+          for secret in evohome-username evohome-password; do
+            if gcloud secrets describe "${secret}" --project="${PROJECT_ID}" &>/dev/null; then
+              echo "  [OK] ${secret}"
+            else
+              echo "  [FAIL] Secret '${secret}' not found." >&2
+              echo "         Run: bash evohome-poller/scripts/set-evohome-credentials.sh -p ${PROJECT_ID} <user> <pass>" >&2
+              FAILED=1
+            fi
+          done
+
+          echo "==> Checking worker SA exists..."
+          WORKER_SA="evohome-poller-worker-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+          if gcloud iam service-accounts describe "${WORKER_SA}" --project="${PROJECT_ID}" &>/dev/null; then
+            echo "  [OK] ${WORKER_SA}"
+          else
+            echo "  [FAIL] Worker SA '${WORKER_SA}' not found." >&2
+            echo "         Apply platform terraform (data-platform-gcp) first." >&2
+            FAILED=1
+          fi
+
+          [[ ${FAILED} -eq 0 ]] || exit 1
+
       # ── Container image ────────────────────────────────────────────────────
 
       - name: Build and push container image
