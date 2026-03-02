@@ -16,7 +16,7 @@ import json
 import signal
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 try:
     from google.cloud import pubsub_v1
@@ -69,7 +69,7 @@ def main() -> None:
     def callback(message: pubsub_v1.types.PubsubMessage) -> None:
         nonlocal count
         count += 1
-        ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+        ts = datetime.now(UTC).strftime("%H:%M:%S.%f")[:-3]
 
         # Decode payload
         try:
