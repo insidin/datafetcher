@@ -16,8 +16,9 @@ permissions:
 env:
   APP_DIR: mqtt2pubsub
   TF_DIR: mqtt2pubsub/terraform
-  REGION: us-central1
+  REGION: europe-west1
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  AR_REPO: ${{ secrets.GCP_ARTIFACT_REGISTRY_REPO }}
 
 jobs:
   deploy:
@@ -35,11 +36,12 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Build container image
+      - name: Build and push container image
         run: |
-          IMAGE="gcr.io/${PROJECT_ID}/mqtt2pubsub:${GITHUB_SHA}"
-          gcloud builds submit "${APP_DIR}" --tag "${IMAGE}" \
-            --gcs-source-staging-dir="gs://${PROJECT_ID}-tfstate/cloudbuild-staging"
+          IMAGE="${AR_REPO}/mqtt2pubsub:${GITHUB_SHA}"
+          gcloud auth configure-docker "${AR_REPO%%/*}" --quiet
+          docker build -t "${IMAGE}" "${APP_DIR}"
+          docker push "${IMAGE}"
           echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
 
       - name: Setup Terraform
