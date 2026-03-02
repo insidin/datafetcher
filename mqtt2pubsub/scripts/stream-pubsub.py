@@ -29,8 +29,9 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Stream messages from a Pub/Sub topic.")
     p.add_argument("--project", required=True, help="GCP project ID")
     p.add_argument("--topic", default="mqtt-ingest", help="Pub/Sub topic name (default: mqtt-ingest)")
-    p.add_argument("--max-messages", type=int, default=0,
-                   help="Stop after N messages; 0 = stream indefinitely (default: 0)")
+    p.add_argument(
+        "--max-messages", type=int, default=0, help="Stop after N messages; 0 = stream indefinitely (default: 0)"
+    )
     return p.parse_args()
 
 
