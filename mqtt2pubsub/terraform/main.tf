@@ -9,7 +9,7 @@ locals {
     { name = "MQTT_TOPIC_TEMPLATE", value = var.mqtt_topic_template },
     { name = "MQTT_CONSUMER_CLIENTS", value = tostring(var.mqtt_consumer_clients) },
     { name = "MQTT_QOS", value = tostring(var.mqtt_qos) },
-    { name = "MQTT_KEEPALIVE_SEC", value = tostring(var.mqtt_keepalive_sec) },
+    { name = "MQTT_KEEPALIVE_SEC", value = var.mqtt_keepalive_sec },
     { name = "MQTT_CLIENT_ID", value = var.mqtt_client_id },
     { name = "MQTT_TLS_ENABLED", value = var.mqtt_tls_enabled ? "true" : "false" },
     { name = "MQTT_TLS_INSECURE", value = var.mqtt_tls_insecure ? "true" : "false" },
@@ -46,60 +46,58 @@ resource "google_pubsub_topic" "mqtt_ingest" {
   labels = var.labels
 }
 
-resource "google_service_account" "job" {
-  account_id   = var.service_account_id
-  display_name = "mqtt2pubsub Cloud Run Job"
-}
-
 # Scoped to this topic only — not the entire project.
 resource "google_pubsub_topic_iam_member" "job_publisher" {
   topic  = google_pubsub_topic.mqtt_ingest.id
   role   = "roles/pubsub.publisher"
-  member = "serviceAccount:${google_service_account.job.email}"
+  member = "serviceAccount:${var.service_account_email}"
 }
 
-resource "google_cloud_run_v2_job" "mqtt2pubsub" {
-  name                = var.job_name
+resource "google_cloud_run_v2_service" "mqtt2pubsub" {
+  name                = var.service_name
   location            = var.region
   deletion_protection = false
   labels              = var.labels
 
   template {
-    task_count  = var.task_count
-    parallelism = var.parallelism
+    service_account = var.service_account_email
 
-    template {
-      service_account = google_service_account.job.email
-      max_retries     = var.task_max_retries
-      timeout         = "${var.task_timeout_seconds}s"
+    scaling {
+      min_instance_count = var.min_instance_count
+      max_instance_count = 1 # singleton worker — MQTT state is not shareable across instances
+    }
 
-      containers {
-        image = var.container_image
+    containers {
+      image = var.container_image
 
-        resources {
-          limits = {
-            cpu    = var.cpu
-            memory = var.memory
-          }
+      resources {
+        limits = {
+          cpu    = var.cpu
+          memory = var.memory
         }
+        cpu_idle = false # keep CPU allocated so the MQTT loop runs continuously
+      }
 
-        dynamic "env" {
-          for_each = local.plain_env
-          content {
-            name  = env.value.name
-            value = env.value.value
-          }
+      ports {
+        container_port = 8080
+      }
+
+      dynamic "env" {
+        for_each = local.plain_env
+        content {
+          name  = env.value.name
+          value = tostring(env.value.value)
         }
+      }
 
-        dynamic "env" {
-          for_each = local.secret_env
-          content {
-            name = env.key
-            value_source {
-              secret_key_ref {
-                secret  = env.value.secret
-                version = env.value.version
-              }
+      dynamic "env" {
+        for_each = local.secret_env
+        content {
+          name = env.key
+          value_source {
+            secret_key_ref {
+              secret  = env.value.secret
+              version = env.value.version
             }
           }
         }
