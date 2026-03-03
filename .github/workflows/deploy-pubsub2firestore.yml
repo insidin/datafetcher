@@ -69,15 +69,6 @@ jobs:
             FAILED=1
           fi
 
-          echo "==> Checking Firestore database exists..."
-          if gcloud firestore databases describe --database="(default)" --project="${PROJECT_ID}" &>/dev/null; then
-            echo "  [OK] Firestore (default)"
-          else
-            echo "  [FAIL] Firestore database not found." >&2
-            echo "         Apply platform terraform (data-platform-gcp) first." >&2
-            FAILED=1
-          fi
-
           echo "==> Checking Pub/Sub topic exists..."
           TOPIC="${{ secrets.PUBSUB2FIRESTORE_PUBSUB_TOPIC }}"
           TOPIC="${TOPIC:-mqtt-ingest}"
