@@ -1,0 +1,100 @@
+name: implement-lakehouse
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  implement:
+    name: Implement with Claude Code
+    runs-on: ubuntu-latest
+
+    if: |
+      (
+        github.event_name == 'issues' &&
+        github.event.label.name == 'claude' &&
+        github.event.issue.user.type != 'Bot'
+      ) || (
+        github.event_name == 'issue_comment' &&
+        startsWith(github.event.comment.body, '/implement') &&
+        github.event.comment.user.type != 'Bot' &&
+        github.event.issue.pull_request == null &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'),
+                 github.event.comment.author_association)
+      )
+
+    steps:
+      - name: Acknowledge
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            :robot: Got it — I'm working on this. I'll open a PR when I'm done.
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build prompt
+        id: prompt
+        run: |
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_BODY=$(cat << 'ISSUE_BODY_EOF'
+          ${{ github.event.issue.body }}
+          ISSUE_BODY_EOF
+          )
+
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            EXTRA=$(echo "${{ github.event.comment.body }}" | sed 's|^/implement[[:space:]]*||')
+            PROMPT="Implement the following change for the lakehouse app (Terraform-only, in lakehouse/).
+
+          Issue #${{ github.event.issue.number }}: ${ISSUE_TITLE}
+
+          ${ISSUE_BODY}
+
+          Additional instructions from reviewer:
+          ${EXTRA}
+
+          Rules:
+          - Work only inside the lakehouse/ directory.
+          - Follow the conventions in lakehouse/CLAUDE.md.
+          - Do not commit directly to main. Create branch claude/issue-${{ github.event.issue.number }}.
+          - Open a draft PR that closes issue #${{ github.event.issue.number }}.
+          - If you make an architectural decision, add an ADR in lakehouse/docs/adr/."
+          else
+            PROMPT="Implement the following change for the lakehouse app (Terraform-only, in lakehouse/).
+
+          Issue #${{ github.event.issue.number }}: ${ISSUE_TITLE}
+
+          ${ISSUE_BODY}
+
+          Rules:
+          - Work only inside the lakehouse/ directory.
+          - Follow the conventions in lakehouse/CLAUDE.md.
+          - Do not commit directly to main. Create branch claude/issue-${{ github.event.issue.number }}.
+          - Open a draft PR that closes issue #${{ github.event.issue.number }}.
+          - If you make an architectural decision, add an ADR in lakehouse/docs/adr/."
+          fi
+
+          echo "${PROMPT}" > /tmp/claude_prompt.txt
+          echo "prompt_file=/tmp/claude_prompt.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt_file: ${{ steps.prompt.outputs.prompt_file }}
+
+      - name: Post failure comment
+        if: failure()
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            :x: Implementation run failed. Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
