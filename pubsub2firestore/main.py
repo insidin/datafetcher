@@ -1,8 +1,8 @@
 """Cloud Run service that pulls from a Pub/Sub subscription and writes to Firestore.
 
 Data model in Firestore:
-  /state/{topic_key}                      — overwritten on every message; current state per MQTT topic
-  /readings/{event_type}/{message_id}     — appended; time-series per event type, TTL-based cleanup
+  /state/{topic_key}               — overwritten on every message; current state per MQTT topic
+  /readings/{event_type}/{msg_id}  — appended; time-series per event type, TTL-based cleanup
 """
 
 import json
