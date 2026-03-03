@@ -103,7 +103,10 @@ jobs:
 
       - name: Smoke-test container imports
         run: |
-          docker run --rm --platform linux/amd64 --entrypoint python "${IMAGE}" \
+          docker run --rm --platform linux/amd64 \
+            -e PUBSUB_SUBSCRIPTION="projects/smoke-test/subscriptions/smoke-test" \
+            -e GCP_PROJECT_ID="smoke-test" \
+            --entrypoint python "${IMAGE}" \
             -c "import main; print('imports OK')"
 
       # ── Terraform ───────────────────────────────────────────────────────────
