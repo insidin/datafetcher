@@ -1,0 +1,113 @@
+name: release-lakehouse
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver to release (e.g. 1.2.3). Leave empty to auto-bump patch."
+        required: false
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    name: Tag and create release
+    runs-on: ubuntu-latest
+
+    if: |
+      github.event_name == 'workflow_dispatch' || (
+        github.event_name == 'issue_comment' &&
+        startsWith(github.event.comment.body, '/release') &&
+        github.event.comment.user.type != 'Bot' &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'),
+                 github.event.comment.author_association)
+      )
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Acknowledge comment
+        if: github.event_name == 'issue_comment'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ github.event.comment.id }}
+          reactions: rocket
+
+      - name: Checkout (full history for tag detection)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine version
+        id: version
+        run: |
+          INPUT_VERSION=""
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            INPUT_VERSION="${{ inputs.version }}"
+          else
+            COMMENT="${{ github.event.comment.body }}"
+            INPUT_VERSION=$(echo "${COMMENT}" | awk '{print $2}')
+          fi
+
+          if [[ -n "${INPUT_VERSION}" ]]; then
+            VERSION="${INPUT_VERSION}"
+          else
+            LATEST=$(git tag --list 'v*' --sort=-version:refname | head -n1)
+            if [[ -z "${LATEST}" ]]; then
+              VERSION="0.1.0"
+            else
+              IFS='.' read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+              VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+            fi
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Releasing v${VERSION}"
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if ! echo "${VERSION}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid version '${VERSION}' — must match X.Y.Z (e.g. 1.2.3)" >&2
+            exit 1
+          fi
+
+      - name: Push tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --title "v${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            --latest
+
+      - name: Post success comment
+        if: github.event_name == 'issue_comment'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            :rocket: **Released `v${{ steps.version.outputs.version }}`** — deploying now.
+            [View release](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}) · [View deploy run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+  deploy:
+    name: Deploy to Google Cloud
+    needs: release
+    uses: ./.github/workflows/deploy-lakehouse.yml
+    secrets: inherit

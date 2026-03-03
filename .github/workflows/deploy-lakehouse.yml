@@ -1,0 +1,94 @@
+name: deploy-lakehouse
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "lakehouse/**"
+      - ".github/workflows/deploy-lakehouse.yml"
+  workflow_dispatch:
+  workflow_call: # allows release-lakehouse.yml to chain into this
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_DIR: lakehouse/terraform
+  REGION: europe-west1
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── GCP authentication ──────────────────────────────────────────────────
+
+      - name: Authenticate to Google Cloud (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.LAKEHOUSE_GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # ── Pre-flight checks ───────────────────────────────────────────────────
+      # Validate GCP prerequisites before attempting terraform apply.
+
+      - name: Pre-flight checks
+        run: |
+          FAILED=0
+
+          echo "==> Checking lakehouse GCS bucket exists..."
+          BUCKET="${PROJECT_ID}-lakehouse"
+          if gcloud storage buckets describe "gs://${BUCKET}" --project="${PROJECT_ID}" &>/dev/null; then
+            echo "  [OK] ${BUCKET}"
+          else
+            echo "  [FAIL] Bucket '${BUCKET}' not found." >&2
+            echo "         Apply platform terraform (data-platform-gcp) first." >&2
+            FAILED=1
+          fi
+
+          echo "==> Checking Pub/Sub topic exists..."
+          TOPIC="${{ secrets.LAKEHOUSE_PUBSUB_TOPIC }}"
+          TOPIC="${TOPIC:-mqtt-ingest}"
+          if gcloud pubsub topics describe "${TOPIC}" --project="${PROJECT_ID}" &>/dev/null; then
+            echo "  [OK] ${TOPIC}"
+          else
+            echo "  [FAIL] Pub/Sub topic '${TOPIC}' not found." >&2
+            echo "         Deploy mqtt2pubsub first, or set LAKEHOUSE_PUBSUB_TOPIC secret." >&2
+            FAILED=1
+          fi
+
+          [[ ${FAILED} -eq 0 ]] || exit 1
+
+      # ── Terraform ───────────────────────────────────────────────────────────
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${PROJECT_ID}-tfstate" \
+            -backend-config="prefix=lakehouse"
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_project_id: ${{ env.PROJECT_ID }}
+          TF_VAR_region: ${{ env.REGION }}
+          # Optional — staged for conditional export below
+          _OPT_PUBSUB_TOPIC: ${{ secrets.LAKEHOUSE_PUBSUB_TOPIC }}
+        run: |
+          [[ -n "${_OPT_PUBSUB_TOPIC}" ]] && export TF_VAR_pubsub_topic="${_OPT_PUBSUB_TOPIC}"
+          terraform apply -auto-approve
