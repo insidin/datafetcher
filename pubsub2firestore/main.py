@@ -97,6 +97,7 @@ def process_message(
     message_type = attributes.get("event_message_type", "")
     now = datetime.now(UTC)
     expires_at = now + timedelta(days=TTL_DAYS)
+    publish_time = message.publish_time  # Pub/Sub publish timestamp
 
     # Unwrap payload: mqtt2pubsub wraps as {"payload": <original>, "_meta": {...}}.
     # Older messages or non-standard sources may not have this wrapper.
@@ -122,6 +123,8 @@ def process_message(
         "mqtt_topic": mqtt_topic,
         "payload": payload,
         "attributes": attributes,
+        "message_id": message.message_id,
+        "publish_time": publish_time,
     }
 
     # 1. Overwrite current state — one document per MQTT topic for live display.
@@ -134,7 +137,7 @@ def process_message(
     db.collection("readings").document(event_type).collection("messages").document(
         message.message_id
     ).set(
-        {**doc, "published_at": now, "expires_at": expires_at},
+        {**doc, "published_at": publish_time, "expires_at": expires_at},
     )
 
 
