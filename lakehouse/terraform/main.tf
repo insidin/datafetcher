@@ -3,6 +3,10 @@ provider "google" {
   region  = var.region
 }
 
+data "google_project" "project" {
+  project_id = var.project_id
+}
+
 locals {
   topic      = "projects/${var.project_id}/topics/${var.pubsub_topic}"
   bq_dataset = google_bigquery_dataset.mqtt.dataset_id
@@ -15,6 +19,17 @@ resource "google_bigquery_dataset" "mqtt" {
   dataset_id  = "mqtt"
   location    = "EU"
   description = "MQTT message history from mqtt2pubsub via Pub/Sub BigQuery subscriptions."
+}
+
+# ── IAM: Pub/Sub service agent → BigQuery ───────────────────────────────────
+# The Google-managed Pub/Sub service agent needs dataEditor on the dataset
+# to write messages from BigQuery subscriptions into tables.
+
+resource "google_bigquery_dataset_iam_member" "pubsub_bq_writer" {
+  project    = var.project_id
+  dataset_id = google_bigquery_dataset.mqtt.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }
 
 # ── BigQuery tables (per event_type) ────────────────────────────────────────
