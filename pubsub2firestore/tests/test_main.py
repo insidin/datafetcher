@@ -65,9 +65,13 @@ def test_update_diagnostics_sets_on_not_found():
 # ── process_message ───────────────────────────────────────────────────────────
 
 
+_FIXED_PUBLISH_TIME = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+
 def _make_message(payload: object, attributes: dict) -> MagicMock:
     msg = MagicMock()
     msg.message_id = "msg-123"
+    msg.publish_time = _FIXED_PUBLISH_TIME
     if payload is None:
         msg.data = b"\xff\xfe"
     elif isinstance(payload, bytes):
@@ -115,8 +119,11 @@ def test_process_message_writes_state_and_reading():
 
     assert state_call["event_type"] == "shellyhtg3_status_temperature_0"
     assert state_call["payload"] == {"tC": 20.5}
+    assert state_call["message_id"] == "msg-123"
+    assert state_call["publish_time"] == _FIXED_PUBLISH_TIME
     assert "expires_at" in reading_call
-    assert "published_at" in reading_call
+    assert reading_call["published_at"] == _FIXED_PUBLISH_TIME
+    assert reading_call["message_id"] == "msg-123"
 
 
 def test_process_message_unwraps_new_payload_format():
