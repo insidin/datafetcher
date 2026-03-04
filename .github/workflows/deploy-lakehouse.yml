@@ -82,6 +82,27 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform validate
 
+      - name: Remove deprecated resources from Terraform state
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_project_id: ${{ env.PROJECT_ID }}
+          TF_VAR_region: ${{ env.REGION }}
+        run: |
+          # One-time migration: old hardcoded table/subscription resources were replaced by for_each.
+          # Remove them from state so Terraform stops trying to destroy them (deletion_protection blocks it).
+          # The GCP resources are preserved as orphaned historical tables.
+          for resource in \
+            'google_bigquery_table.shelly_temperature' \
+            'google_bigquery_table.shelly_humidity' \
+            'google_bigquery_table.shelly_battery' \
+            'google_bigquery_table.shelly_switch' \
+            'google_pubsub_subscription.shelly_temperature_bq' \
+            'google_pubsub_subscription.shelly_humidity_bq' \
+            'google_pubsub_subscription.shelly_battery_bq' \
+            'google_pubsub_subscription.shelly_switch_bq'; do
+            terraform state rm "$resource" 2>/dev/null || true
+          done
+
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
         env:
