@@ -10,5 +10,5 @@ output "history_subscription" {
 
 output "lakehouse_bucket" {
   description = "GCS bucket for BigLake Iceberg files (created by platform terraform)."
-  value       = local.bucket_name
+  value       = "${var.project_id}-lakehouse"
 }
