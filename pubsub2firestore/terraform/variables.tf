@@ -31,6 +31,12 @@ variable "subscription_filter" {
   default     = ""
 }
 
+variable "mqtt_event_types" {
+  type        = string
+  description = "Comma-separated event_types that get written to state + readings in Firestore. Empty = write all."
+  default     = ""
+}
+
 variable "ttl_days" {
   type        = number
   description = "Number of days to retain time-series readings in Firestore before they expire."

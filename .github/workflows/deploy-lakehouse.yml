@@ -89,6 +89,12 @@ jobs:
           TF_VAR_region: ${{ env.REGION }}
           # Optional — staged for conditional export below
           _OPT_PUBSUB_TOPIC: ${{ secrets.LAKEHOUSE_PUBSUB_TOPIC }}
+          _OPT_MQTT_EVENT_TYPES: ${{ secrets.MQTT_EVENT_TYPES }}
         run: |
           [[ -n "${_OPT_PUBSUB_TOPIC}" ]] && export TF_VAR_pubsub_topic="${_OPT_PUBSUB_TOPIC}"
+          # MQTT_EVENT_TYPES is a comma-separated string; convert to Terraform list syntax.
+          if [[ -n "${_OPT_MQTT_EVENT_TYPES}" ]]; then
+            TF_LIST=$(echo "${_OPT_MQTT_EVENT_TYPES}" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sed 's/.*/"&"/' | paste -sd ',' -)
+            export TF_VAR_mqtt_event_types="[${TF_LIST}]"
+          fi
           terraform apply -auto-approve

@@ -137,9 +137,11 @@ jobs:
           _OPT_SUBSCRIPTION_FILTER: ${{ secrets.PUBSUB2FIRESTORE_SUBSCRIPTION_FILTER }}
           _OPT_TTL_DAYS: ${{ secrets.PUBSUB2FIRESTORE_TTL_DAYS }}
           _OPT_LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+          _OPT_MQTT_EVENT_TYPES: ${{ secrets.MQTT_EVENT_TYPES }}
         run: |
-          [[ -n "${_OPT_PUBSUB_TOPIC}" ]]         && export TF_VAR_pubsub_topic="${_OPT_PUBSUB_TOPIC}"
-          [[ -n "${_OPT_SUBSCRIPTION_FILTER}" ]]  && export TF_VAR_subscription_filter="${_OPT_SUBSCRIPTION_FILTER}"
-          [[ -n "${_OPT_TTL_DAYS}" ]]             && export TF_VAR_ttl_days="${_OPT_TTL_DAYS}"
-          [[ -n "${_OPT_LOG_LEVEL}" ]]            && export TF_VAR_log_level="${_OPT_LOG_LEVEL}"
+          [[ -n "${_OPT_PUBSUB_TOPIC}" ]]        && export TF_VAR_pubsub_topic="${_OPT_PUBSUB_TOPIC}"
+          [[ -n "${_OPT_SUBSCRIPTION_FILTER}" ]] && export TF_VAR_subscription_filter="${_OPT_SUBSCRIPTION_FILTER}"
+          [[ -n "${_OPT_TTL_DAYS}" ]]            && export TF_VAR_ttl_days="${_OPT_TTL_DAYS}"
+          [[ -n "${_OPT_LOG_LEVEL}" ]]           && export TF_VAR_log_level="${_OPT_LOG_LEVEL}"
+          [[ -n "${_OPT_MQTT_EVENT_TYPES}" ]]    && export TF_VAR_mqtt_event_types="${_OPT_MQTT_EVENT_TYPES}"
           terraform apply -auto-approve

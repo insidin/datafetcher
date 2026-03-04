@@ -149,19 +149,13 @@ jobs:
           # Optional — staged for conditional export below
           _OPT_MQTT_TOPIC: ${{ secrets.MQTT_TOPIC }}
           _OPT_MQTT_TOPIC_TEMPLATE: ${{ secrets.MQTT_TOPIC_TEMPLATE }}
-          _OPT_EVENT_TYPE_TOPIC_MAP: ${{ secrets.EVENT_TYPE_TOPIC_MAP }}
-          _OPT_EVENT_TYPE_JSON_FIELDS: ${{ secrets.EVENT_TYPE_JSON_FIELDS }}
-          _OPT_EVENT_TYPE_FALLBACK: ${{ secrets.EVENT_TYPE_FALLBACK }}
           _OPT_DEVICE_IDENTIFIERS: ${{ secrets.DEVICE_IDENTIFIERS }}
         run: |
           # Export optional TF_VAR_* only when the secret is non-empty so that
           # an unset secret doesn't override the default in variables.tf.
-          [[ -n "${_OPT_MQTT_TOPIC}" ]]            && export TF_VAR_mqtt_topic="${_OPT_MQTT_TOPIC}"
-          [[ -n "${_OPT_MQTT_TOPIC_TEMPLATE}" ]]   && export TF_VAR_mqtt_topic_template="${_OPT_MQTT_TOPIC_TEMPLATE}"
-          [[ -n "${_OPT_EVENT_TYPE_TOPIC_MAP}" ]]  && export TF_VAR_event_type_topic_map="${_OPT_EVENT_TYPE_TOPIC_MAP}"
-          [[ -n "${_OPT_EVENT_TYPE_JSON_FIELDS}" ]] && export TF_VAR_event_type_json_fields="${_OPT_EVENT_TYPE_JSON_FIELDS}"
-          [[ -n "${_OPT_EVENT_TYPE_FALLBACK}" ]]   && export TF_VAR_event_type_fallback="${_OPT_EVENT_TYPE_FALLBACK}"
-          [[ -n "${_OPT_DEVICE_IDENTIFIERS}" ]]    && export TF_VAR_device_identifiers="${_OPT_DEVICE_IDENTIFIERS}"
+          [[ -n "${_OPT_MQTT_TOPIC}" ]]          && export TF_VAR_mqtt_topic="${_OPT_MQTT_TOPIC}"
+          [[ -n "${_OPT_MQTT_TOPIC_TEMPLATE}" ]] && export TF_VAR_mqtt_topic_template="${_OPT_MQTT_TOPIC_TEMPLATE}"
+          [[ -n "${_OPT_DEVICE_IDENTIFIERS}" ]]  && export TF_VAR_device_identifiers="${_OPT_DEVICE_IDENTIFIERS}"
 
           # mqtt_consumer_clients is numeric — validate before use
           CLIENTS="${{ secrets.MQTT_CONSUMER_CLIENTS }}"

@@ -14,3 +14,9 @@ variable "pubsub_topic" {
   description = "Pub/Sub topic name to create BigQuery subscriptions on."
   default     = "mqtt-ingest"
 }
+
+variable "mqtt_event_types" {
+  type        = list(string)
+  description = "Event types to create individual BigQuery tables and subscriptions for. Each value becomes a table_id and subscription filter."
+  default     = []
+}

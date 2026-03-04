@@ -150,24 +150,6 @@ variable "pubsub_publish_retries" {
   default     = 5
 }
 
-variable "event_type_topic_map" {
-  type        = string
-  description = "Semicolon-separated topic map '<mqtt_filter>=<event_type>;...'. First match wins."
-  default     = ""
-}
-
-variable "event_type_json_fields" {
-  type        = string
-  description = "Comma-separated payload JSON fields checked for event type when no topic map match."
-  default     = "event_type,type,kind"
-}
-
-variable "event_type_fallback" {
-  type        = string
-  description = "Fallback event type when no mapping/field is found."
-  default     = "unknown"
-}
-
 variable "mqtt_username_secret" {
   type        = string
   description = "Secret Manager secret name for MQTT username. Defaults to the conventional name 'mqtt-username'. Set to empty string to skip (anonymous brokers)."

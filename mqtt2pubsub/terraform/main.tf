@@ -18,9 +18,6 @@ locals {
     { name = "GCP_PROJECT_ID", value = var.project_id },
     { name = "PUBSUB_PUBLISH_TIMEOUT_SEC", value = tostring(var.pubsub_publish_timeout_sec) },
     { name = "PUBSUB_PUBLISH_RETRIES", value = tostring(var.pubsub_publish_retries) },
-    { name = "EVENT_TYPE_TOPIC_MAP", value = var.event_type_topic_map },
-    { name = "EVENT_TYPE_JSON_FIELDS", value = var.event_type_json_fields },
-    { name = "EVENT_TYPE_FALLBACK", value = var.event_type_fallback },
     { name = "MAX_MESSAGES", value = tostring(var.max_messages) },
     { name = "MAX_RUNTIME_SEC", value = tostring(var.max_runtime_sec) },
   ]
