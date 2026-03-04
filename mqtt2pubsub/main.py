@@ -7,7 +7,6 @@ import base64
 import json
 import logging
 import os
-import re
 import signal
 import sys
 import threading
@@ -19,6 +18,51 @@ from typing import Protocol
 
 import paho.mqtt.client as mqtt
 from google.cloud import pubsub_v1
+
+
+def _parse_mqtt_topic(topic: str) -> dict[str, str] | None:
+    """Parse an MQTT topic into device and event metadata.
+
+    Topic format: {deviceType}-{deviceId}/{messagePath}
+    Example: shellyplugsg3-e4b063e59f78/status/switch:0
+
+    Returns a dict with 5 attribute keys, or None for non-standard topics.
+    """
+    slash = topic.find("/")
+    if slash == -1:
+        return None
+    device_part = topic[:slash]
+    message_path = topic[slash + 1 :]
+    dash = device_part.find("-")
+    if dash == -1 or not message_path:
+        return None
+    device_type = device_part[:dash]
+    device_id = device_part[dash + 1 :]
+    if not device_type or not device_id:
+        return None
+    message_type = message_path.replace("/", "_").replace(":", "_")
+    event_type = f"{device_type}_{message_type}"
+    return {
+        "event_type": event_type,
+        "event_device_uid": device_part,
+        "event_device_type": device_type,
+        "event_device_id": device_id,
+        "event_message_type": message_type,
+    }
+
+
+def _inject_meta(payload: bytes, meta: dict[str, str]) -> bytes:
+    """Wrap payload as {"payload": <original>, "_meta": <meta dict>}.
+
+    If the original payload is valid UTF-8 JSON, it is inlined as-is.
+    Binary or invalid-JSON payloads are stored as null.
+    """
+    try:
+        inner: object = json.loads(payload.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        inner = None
+    wrapped = {"payload": inner, "_meta": meta}
+    return json.dumps(wrapped, separators=(",", ":")).encode("utf-8")
 
 
 def _required_env(name: str) -> str:
@@ -48,69 +92,6 @@ def _env_bool(name: str, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"Environment variable {name} must be boolean, got {raw!r}")
-
-
-def _env_csv(name: str, default: str) -> tuple[str, ...]:
-    raw = os.getenv(name, default)
-    return tuple(item.strip() for item in raw.split(",") if item.strip())
-
-
-def _mqtt_topic_matches(topic_filter: str, topic: str) -> bool:
-    """Match MQTT topic with MQTT filter syntax (+ and # wildcards)."""
-    filter_levels = topic_filter.split("/")
-    topic_levels = topic.split("/")
-    idx_filter = 0
-    idx_topic = 0
-
-    while idx_filter < len(filter_levels):
-        filter_level = filter_levels[idx_filter]
-
-        if filter_level == "#":
-            return idx_filter == len(filter_levels) - 1
-
-        if idx_topic >= len(topic_levels):
-            return False
-
-        if filter_level != "+" and filter_level != topic_levels[idx_topic]:
-            return False
-
-        idx_filter += 1
-        idx_topic += 1
-
-    return idx_topic == len(topic_levels)
-
-
-_EVENT_TYPE_SAFE_RE = re.compile(r"[^a-z0-9_.-]+")
-
-
-def _normalize_event_type(value: str, fallback: str) -> str:
-    normalized = _EVENT_TYPE_SAFE_RE.sub("_", value.strip().lower()).strip("._-")
-    if normalized:
-        return normalized
-    return fallback
-
-
-def _parse_event_type_topic_map(raw: str, fallback: str) -> tuple[tuple[str, str], ...]:
-    if not raw.strip():
-        return ()
-
-    rules: list[tuple[str, str]] = []
-    for item in raw.split(";"):
-        item = item.strip()
-        if not item:
-            continue
-        if "=" not in item:
-            raise ValueError(
-                f"EVENT_TYPE_TOPIC_MAP entries must be in '<mqtt_filter>=<event_type>' format, got {item!r}"
-            )
-        topic_filter, event_type = item.split("=", 1)
-        topic_filter = topic_filter.strip()
-        event_type = _normalize_event_type(event_type, fallback)
-        if not topic_filter:
-            raise ValueError(f"EVENT_TYPE_TOPIC_MAP has empty topic filter in entry {item!r}")
-        rules.append((topic_filter, event_type))
-
-    return tuple(rules)
 
 
 def _parse_device_identifiers(raw: str) -> tuple[str, ...]:
@@ -229,9 +210,6 @@ class Settings:
     max_messages: int
     max_runtime_sec: int
     local_output_path: str | None
-    event_type_topic_map: tuple[tuple[str, str], ...]
-    event_type_json_fields: tuple[str, ...]
-    event_type_fallback: str
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -268,13 +246,6 @@ class Settings:
         if qos not in (0, 1, 2):
             raise ValueError(f"MQTT_QOS must be one of 0, 1, 2; got {qos}")
 
-        event_type_fallback = _normalize_event_type(os.getenv("EVENT_TYPE_FALLBACK", "unknown"), "unknown")
-        event_type_topic_map = _parse_event_type_topic_map(
-            os.getenv("EVENT_TYPE_TOPIC_MAP", ""),
-            event_type_fallback,
-        )
-        event_type_json_fields = _env_csv("EVENT_TYPE_JSON_FIELDS", "event_type,type,kind")
-
         return cls(
             forward_mode=forward_mode,
             mqtt_host=_required_env("MQTT_HOST"),
@@ -300,9 +271,6 @@ class Settings:
             max_messages=max(_env_int("MAX_MESSAGES", 0), 0),
             max_runtime_sec=max(_env_int("MAX_RUNTIME_SEC", 0), 0),
             local_output_path=os.getenv("LOCAL_OUTPUT_PATH") or None,
-            event_type_topic_map=event_type_topic_map,
-            event_type_json_fields=event_type_json_fields,
-            event_type_fallback=event_type_fallback,
         )
 
 
@@ -429,51 +397,26 @@ class MqttToPubSubForwarder:
             return
         logging.warning("MQTT client=%s disconnected unexpectedly: %s", client_index or "?", reason_code)
 
-    def _derive_event_type(self, message: mqtt.MQTTMessage) -> tuple[str, str]:
-        for topic_filter, event_type in self.settings.event_type_topic_map:
-            if _mqtt_topic_matches(topic_filter, message.topic):
-                return event_type, f"topic_map:{topic_filter}"
-
-        for identifier in self.settings.device_identifiers:
-            prefix = f"{identifier}/"
-            if message.topic.startswith(prefix):
-                remainder = message.topic[len(prefix) :]
-                if remainder:
-                    event_segment = remainder.split("/", 1)[0]
-                    event_type = _normalize_event_type(event_segment, self.settings.event_type_fallback)
-                    return event_type, f"topic_after_identifier:{identifier}"
-
-        try:
-            payload_obj = json.loads(message.payload.decode("utf-8"))
-        except Exception:  # noqa: BLE001
-            payload_obj = None
-
-        if isinstance(payload_obj, dict):
-            for field in self.settings.event_type_json_fields:
-                field_value = payload_obj.get(field)
-                if field_value is None:
-                    continue
-                if isinstance(field_value, str):
-                    normalized = _normalize_event_type(field_value, self.settings.event_type_fallback)
-                    return normalized, f"payload_field:{field}"
-                if isinstance(field_value, (int, float, bool)):
-                    normalized = _normalize_event_type(str(field_value), self.settings.event_type_fallback)
-                    return normalized, f"payload_field:{field}"
-
-        return self.settings.event_type_fallback, "fallback"
-
     def _publish(self, message: mqtt.MQTTMessage) -> str:
-        event_type, event_type_source = self._derive_event_type(message)
+        meta = _parse_mqtt_topic(message.topic)
+        if meta is None:
+            meta = {
+                "event_type": "unknown",
+                "event_device_uid": message.topic,
+                "event_device_type": "unknown",
+                "event_device_id": "unknown",
+                "event_message_type": "unknown",
+            }
         attributes = {
             "mqtt_topic": message.topic,
             "mqtt_qos": str(message.qos),
             "mqtt_retain": "1" if message.retain else "0",
             "mqtt_mid": str(message.mid),
             "received_at_utc": datetime.now(UTC).isoformat(),
-            "event_type": event_type,
-            "event_type_source": event_type_source,
+            **meta,
         }
-        return self.sink.publish(message.payload, attributes)
+        payload = _inject_meta(message.payload, meta)
+        return self.sink.publish(payload, attributes)
 
     def _on_message(
         self,

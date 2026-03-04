@@ -67,6 +67,10 @@ resource "google_cloud_run_v2_service" "pubsub2firestore" {
         value = tostring(var.ttl_days)
       }
       env {
+        name  = "MQTT_EVENT_TYPES"
+        value = var.mqtt_event_types
+      }
+      env {
         name  = "LOG_LEVEL"
         value = var.log_level
       }
