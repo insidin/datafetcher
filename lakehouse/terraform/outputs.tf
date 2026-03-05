@@ -12,3 +12,8 @@ output "lakehouse_bucket" {
   description = "GCS bucket for BigLake Iceberg files (created by platform terraform)."
   value       = "${var.project_id}-lakehouse"
 }
+
+output "event_type_views" {
+  description = "BigQuery views created per event_type."
+  value       = [for v in google_bigquery_table.event_type_view : v.table_id]
+}
