@@ -37,7 +37,6 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       # ── Pre-flight checks ───────────────────────────────────────────────────
-      # Validate GCP prerequisites before attempting terraform apply.
 
       - name: Pre-flight checks
         run: |
@@ -88,9 +87,8 @@ jobs:
           TF_VAR_project_id: ${{ env.PROJECT_ID }}
           TF_VAR_region: ${{ env.REGION }}
         run: |
-          # One-time migration: old hardcoded table/subscription resources were replaced by for_each.
-          # Remove them from state so Terraform stops trying to destroy them (deletion_protection blocks it).
-          # The GCP resources are preserved as orphaned historical tables.
+          # Remove resources that no longer exist in terraform config.
+          # Idempotent: no-op if already removed from state.
           for resource in \
             'google_bigquery_table.shelly_temperature' \
             'google_bigquery_table.shelly_humidity' \
@@ -99,32 +97,16 @@ jobs:
             'google_pubsub_subscription.shelly_temperature_bq' \
             'google_pubsub_subscription.shelly_humidity_bq' \
             'google_pubsub_subscription.shelly_battery_bq' \
-            'google_pubsub_subscription.shelly_switch_bq'; do
+            'google_pubsub_subscription.shelly_switch_bq' \
+            'google_bigquery_table.event_type["shellyhtg3_status_temperature_0"]' \
+            'google_bigquery_table.event_type["shellyhtg3_status_humidity_0"]' \
+            'google_bigquery_table.event_type["shellyhtg3_status_devicepower_0"]' \
+            'google_bigquery_table.event_type["shellyplugsg3_status_switch_0"]' \
+            'google_pubsub_subscription.event_type_bq["shellyhtg3_status_temperature_0"]' \
+            'google_pubsub_subscription.event_type_bq["shellyhtg3_status_humidity_0"]' \
+            'google_pubsub_subscription.event_type_bq["shellyhtg3_status_devicepower_0"]' \
+            'google_pubsub_subscription.event_type_bq["shellyplugsg3_status_switch_0"]'; do
             terraform state rm "$resource" 2>/dev/null || true
-          done
-
-      - name: Recreate event_type tables with corrected schema
-        working-directory: ${{ env.TF_DIR }}
-        env:
-          TF_VAR_project_id: ${{ env.PROJECT_ID }}
-          TF_VAR_region: ${{ env.REGION }}
-          _OPT_MQTT_EVENT_TYPES: ${{ secrets.MQTT_EVENT_TYPES }}
-        run: |
-          # One-time schema migration: tables were initially created with wrong column names
-          # (_message_id, _publish_time, _attributes) that Pub/Sub does not recognise.
-          # Detect by checking for the old _message_id column; if found, remove from state
-          # and delete from GCP so terraform apply recreates them with the correct schema.
-          # Tables are empty so no data is lost. Safe to re-run: no-op once schema is correct.
-          if [[ -z "${_OPT_MQTT_EVENT_TYPES}" ]]; then exit 0; fi
-          IFS=',' read -ra EVENT_TYPES <<< "${_OPT_MQTT_EVENT_TYPES}"
-          for et in "${EVENT_TYPES[@]}"; do
-            et=$(echo "$et" | xargs)
-            TABLE="${PROJECT_ID}:mqtt.${et}"
-            if bq show --format=json "${TABLE}" 2>/dev/null | grep -q '"_message_id"'; then
-              echo "  Old schema detected on ${et} — recreating"
-              terraform state rm "google_bigquery_table.event_type[\"${et}\"]" 2>/dev/null || true
-              bq rm -f --table "${TABLE}"
-            fi
           done
 
       - name: Terraform apply

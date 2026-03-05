@@ -2,21 +2,36 @@
 
 ## What this app is
 
-Terraform-only app. No running service. Manages BigQuery datasets, tables, and
-Pub/Sub BigQuery subscriptions that form the historical data lakehouse for all
-datafetcher sources.
+Terraform-only app. No running service. Manages a BigQuery dataset with a
+single history table and per-event-type views, plus one Pub/Sub BigQuery
+subscription that feeds all MQTT messages into the history table.
 
 ## Directory layout
 
 ```
 lakehouse/
 ├── terraform/          # All Terraform — the only artefact this app produces
-│   ├── main.tf         # BigQuery datasets + tables + Pub/Sub subscriptions
+│   ├── main.tf         # BigQuery dataset + history table + subscription + views
 │   ├── variables.tf
 │   ├── outputs.tf
 │   └── versions.tf
-└── docs/adr/           # Architecture decisions
+├── docs/adr/           # Architecture decisions
+├── BACKLOG.md          # Open items and investigations
+└── CLAUDE.md           # This file
 ```
+
+## Architecture
+
+- **One history table** (`mqtt.history`) — standard Pub/Sub subscription schema
+  with `write_metadata = true`. Columns: `subscription_name`, `message_id`,
+  `publish_time`, `data` (BYTES), `attributes` (JSON).
+- **One subscription** (`mqtt-history-bq`) — catch-all, no filter, writes every
+  message from the `mqtt-ingest` topic.
+- **Views per event_type** — filtered views on the history table that extract
+  `payload` and `meta` from the raw `data` bytes using `JSON_QUERY()`.
+
+See [ADR-001](docs/adr/ADR-001-views-over-typed-tables.md) for why views were
+chosen over per-event-type tables.
 
 ## Deploying
 
@@ -27,35 +42,34 @@ terraform apply
 ```
 
 Required GitHub secret: `LAKEHOUSE_GCP_DEPLOYER_SERVICE_ACCOUNT`
-Optional GitHub secret: `LAKEHOUSE_PUBSUB_TOPIC` (default: `mqtt-ingest`)
+Optional GitHub secrets:
+- `LAKEHOUSE_PUBSUB_TOPIC` (default: `mqtt-ingest`)
+- `MQTT_EVENT_TYPES` (comma-separated list — drives view creation)
 
-## BigLake Iceberg upgrade
+## Adding a new event type view
 
-The tables are currently standard BigQuery partitioned tables. To upgrade to
-managed BigLake Iceberg format (enables `DuckDB iceberg_scan`), run:
+Add the event type to the `MQTT_EVENT_TYPES` GitHub secret (comma-separated).
+The next deploy creates the view automatically via `for_each`.
 
-```bash
-# One-time, after terraform apply has created the tables:
-bq query --use_legacy_sql=false "
-  ALTER TABLE \`<project>.mqtt.shelly_temperature\`
-  SET OPTIONS (file_format='PARQUET', table_format='ICEBERG',
-               storage_uri='gs://<project>-lakehouse/iceberg/mqtt/shelly_temperature/');
-"
-# Repeat for each table: shelly_humidity, shelly_battery, shelly_switch, history
+## Querying
+
+```sql
+-- Via view
+SELECT * FROM `<project>.mqtt.shellyhtg3_status_temperature_0`
+ORDER BY publish_time DESC LIMIT 10;
+
+-- Direct from history with payload extraction
+SELECT
+  publish_time,
+  JSON_QUERY(SAFE_CONVERT_BYTES_TO_STRING(data), '$.payload') AS payload,
+  attributes
+FROM `<project>.mqtt.history`
+WHERE JSON_VALUE(attributes, '$.event_type') = 'shellyhtg3_status_temperature_0'
+ORDER BY publish_time DESC LIMIT 10;
 ```
-
-This is tracked in ADR-001.
-
-## Adding a new event type
-
-1. Add a `google_bigquery_table` resource to `main.tf` with the correct schema.
-2. Add a `google_pubsub_subscription` resource with a `filter` on `attributes.event_type`.
-3. Update `EVENT_TYPE_TOPIC_MAP` in the `mqtt2pubsub` Cloud Run env (GitHub secret).
-4. Run `terraform apply`.
 
 ## Conventions
 
-- Partition all tables by `DAY` on the timestamp column.
-- Use `JSON` type for nested payload objects rather than flattening — keeps the
-  schema stable as device firmware evolves.
-- Subscription names: `{event_type}-bq` for typed, `mqtt-history-bq` for catch-all.
+- Partition history table by `DAY` on `publish_time`.
+- Use `JSON` type for `attributes` — keeps all Pub/Sub metadata queryable.
+- View names match event_type names exactly.
